@@ -11,6 +11,17 @@ class BatchViewSet(viewsets.ModelViewSet):
     queryset = Batch.objects.all()
     serializer_class = BatchSerializer
 
+    def get_queryset(self):
+        from django.db.models import Count, Q
+        return Batch.objects.annotate(
+            annotated_roll_count=Count('rolls'),
+            annotated_accepted_count=Count('rolls', filter=Q(rolls__status='accepted')),
+            annotated_warning_count=Count('rolls', filter=Q(rolls__status='warning')),
+            annotated_rejected_count=Count('rolls', filter=Q(rolls__status='rejected')),
+            annotated_scanned_count=Count('rolls', filter=~Q(rolls__status='pending')),
+        ).order_by('-created_at')
+
+
     def get_serializer_class(self):
         if self.action == 'create':
             return BatchCreateSerializer
@@ -20,6 +31,14 @@ class BatchViewSet(viewsets.ModelViewSet):
         serializer = BatchCreateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         batch = serializer.save()
+        
+        # Annotate the newly created batch instance to prevent queries when serializing it
+        batch.annotated_roll_count = 0
+        batch.annotated_accepted_count = 0
+        batch.annotated_warning_count = 0
+        batch.annotated_rejected_count = 0
+        batch.annotated_scanned_count = 0
+        
         return Response(
             BatchSerializer(batch).data,
             status=status.HTTP_201_CREATED
@@ -29,8 +48,9 @@ class BatchViewSet(viewsets.ModelViewSet):
     def rolls(self, request, pk=None):
         """Get all rolls for a batch."""
         batch = self.get_object()
-        rolls = batch.rolls.all()
+        rolls = batch.rolls.all().prefetch_related('scans')
         return Response(RollSerializer(rolls, many=True).data)
+
 
     @action(detail=True, methods=['patch'], url_path='client-shade')
     def set_client_shade(self, request, pk=None):

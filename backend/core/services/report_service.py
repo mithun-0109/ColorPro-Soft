@@ -35,24 +35,25 @@ def generate_report(batch_id, user=None):
         RuntimeError: If PDF generation fails
     """
     batch = Batch.objects.get(id=batch_id)
-    rolls = batch.rolls.all().order_by('order', 'roll_number')
-    comparison_results = batch.comparison_results.all()
+    rolls = list(batch.rolls.all().prefetch_related('scans').order_by('order', 'roll_number'))
+    comparison_results = list(batch.comparison_results.all().select_related('roll_1', 'roll_2'))
 
-    # Group rolls by status
-    accepted_rolls = rolls.filter(status='accepted')
-    warning_rolls = rolls.filter(status='warning')
-    rejected_rolls = rolls.filter(status='rejected')
+    # Group rolls by status (in memory)
+    accepted_rolls = [r for r in rolls if r.status == 'accepted']
+    warning_rolls = [r for r in rolls if r.status == 'warning']
+    rejected_rolls = [r for r in rolls if r.status == 'rejected']
 
     # Group rolls by shade group
     shade_groups = {}
-    for roll in rolls.filter(shade_group__isnull=False):
-        group = roll.shade_group
-        if group not in shade_groups:
-            shade_groups[group] = []
-        shade_groups[group].append(roll)
+    for roll in rolls:
+        if roll.shade_group is not None:
+            group = roll.shade_group
+            if group not in shade_groups:
+                shade_groups[group] = []
+            shade_groups[group].append(roll)
 
     # Compute stats
-    scanned_rolls = rolls.exclude(status='pending')
+    scanned_rolls = [r for r in rolls if r.status != 'pending']
     delta_e_values = [r.delta_e for r in scanned_rolls if r.delta_e is not None]
 
     stats = {}
@@ -62,9 +63,17 @@ def generate_report(batch_id, user=None):
             'max_de': round(max(delta_e_values), 4),
             'mean_de': round(sum(delta_e_values) / len(delta_e_values), 4),
             'pass_rate': round(
-                (accepted_rolls.count() + warning_rolls.count()) / max(scanned_rolls.count(), 1) * 100, 1
+                (len(accepted_rolls) + len(warning_rolls)) / max(len(scanned_rolls), 1) * 100, 1
             ),
         }
+
+    # Set annotated counts in memory to avoid database queries in template
+    batch.annotated_roll_count = len(rolls)
+    batch.annotated_accepted_count = len(accepted_rolls)
+    batch.annotated_warning_count = len(warning_rolls)
+    batch.annotated_rejected_count = len(rejected_rolls)
+    batch.annotated_scanned_count = len(scanned_rolls)
+
 
     context = {
         'brand_name': settings.BRAND_NAME,
@@ -81,6 +90,7 @@ def generate_report(batch_id, user=None):
         'generated_at': datetime.now(),
         'generated_by': user,
     }
+
 
     # Render HTML
     html_content = render_to_string('reports/batch_report.html', context)

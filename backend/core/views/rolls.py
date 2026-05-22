@@ -8,7 +8,7 @@ from core.serializers.roll import RollSerializer, RollCreateSerializer, RollBulk
 
 class RollViewSet(viewsets.ModelViewSet):
     """CRUD endpoints for rolls."""
-    queryset = Roll.objects.all()
+    queryset = Roll.objects.prefetch_related('scans')
     serializer_class = RollSerializer
     filterset_fields = ['batch', 'status', 'shade_group', 'is_held']
 
@@ -43,16 +43,34 @@ def bulk_create_rolls(request):
             status=status.HTTP_404_NOT_FOUND
         )
 
-    created_rolls = []
+    import uuid
+    # Fetch existing rolls of this batch matching target roll numbers
+    existing_rolls = {
+        r.roll_number: r for r in Roll.objects.filter(batch=batch, roll_number__in=roll_numbers)
+    }
+
+    rolls_to_create = []
     for idx, roll_num in enumerate(roll_numbers):
-        roll, created = Roll.objects.get_or_create(
-            batch=batch,
-            roll_number=roll_num,
-            defaults={'order': idx}
-        )
-        created_rolls.append(roll)
+        if roll_num not in existing_rolls:
+            new_roll = Roll(
+                id=uuid.uuid4(),
+                batch=batch,
+                roll_number=roll_num,
+                order=idx
+            )
+            rolls_to_create.append(new_roll)
+
+    if rolls_to_create:
+        Roll.objects.bulk_create(rolls_to_create)
+
+    # Fetch all rolls with prefetched scans and return them in the requested order
+    db_rolls = {
+        r.roll_number: r for r in Roll.objects.filter(batch=batch, roll_number__in=roll_numbers).prefetch_related('scans')
+    }
+    ordered_rolls = [db_rolls[roll_num] for roll_num in roll_numbers if roll_num in db_rolls]
 
     return Response(
-        RollSerializer(created_rolls, many=True).data,
+        RollSerializer(ordered_rolls, many=True).data,
         status=status.HTTP_201_CREATED
     )
+

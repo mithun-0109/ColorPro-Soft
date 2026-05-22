@@ -29,7 +29,8 @@ def device_roll_queue(request, batch_id):
         )
 
     # Return all rolls ordered by position, with status info
-    rolls = batch.rolls.all().order_by('order', 'created_at')
+    rolls = batch.rolls.all().prefetch_related('scans').order_by('order', 'created_at')
+
 
     roll_data = []
     for roll in rolls:

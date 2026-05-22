@@ -15,6 +15,8 @@ class BatchSerializer(serializers.ModelSerializer):
     def get_rejected_count(self, obj): return obj.rejected_count
     def get_scanned_count(self, obj): return obj.scanned_count
 
+
+
     class Meta:
         model = Batch
         fields = [

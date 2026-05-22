@@ -37,7 +37,8 @@ def cluster_shade_groups(batch_id):
         # Single roll or no rolls — assign all to group 1
         for roll in rolls:
             roll.shade_group = 1
-            roll.save(update_fields=['shade_group'])
+        if rolls:
+            Roll.objects.bulk_update(rolls, ['shade_group'])
         return {1: rolls} if rolls else {}
 
     # Build LAB feature matrix
@@ -57,13 +58,16 @@ def cluster_shade_groups(batch_id):
     for roll, label in zip(rolls, labels):
         group_num = int(label) + 1  # 1-indexed
         roll.shade_group = group_num
-        roll.save(update_fields=['shade_group'])
 
         if group_num not in groups:
             groups[group_num] = []
         groups[group_num].append(roll)
 
+    if rolls:
+        Roll.objects.bulk_update(rolls, ['shade_group'])
+
     return dict(sorted(groups.items()))
+
 
 
 def _cluster_agglomerative(lab_matrix):

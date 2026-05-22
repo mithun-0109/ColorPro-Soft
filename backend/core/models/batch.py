@@ -34,20 +34,31 @@ class Batch(models.Model):
 
     @property
     def roll_count(self):
+        if hasattr(self, 'annotated_roll_count'):
+            return self.annotated_roll_count
         return self.rolls.count()
 
     @property
     def accepted_count(self):
+        if hasattr(self, 'annotated_accepted_count'):
+            return self.annotated_accepted_count
         return self.rolls.filter(status='accepted').count()
 
     @property
     def warning_count(self):
+        if hasattr(self, 'annotated_warning_count'):
+            return self.annotated_warning_count
         return self.rolls.filter(status='warning').count()
 
     @property
     def rejected_count(self):
+        if hasattr(self, 'annotated_rejected_count'):
+            return self.annotated_rejected_count
         return self.rolls.filter(status='rejected').count()
 
     @property
     def scanned_count(self):
+        if hasattr(self, 'annotated_scanned_count'):
+            return self.annotated_scanned_count
         return self.rolls.exclude(status='pending').count()
+

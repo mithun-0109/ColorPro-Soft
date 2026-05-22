@@ -43,7 +43,8 @@ def get_comparison_results(request, batch_id):
 
     GET /api/compare/<batch_id>/
     """
-    results = ComparisonResult.objects.filter(batch_id=batch_id)
+    results = ComparisonResult.objects.filter(batch_id=batch_id).select_related('roll_1', 'roll_2')
+
     return Response(ComparisonResultSerializer(results, many=True).data)
 
 

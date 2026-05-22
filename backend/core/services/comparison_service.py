@@ -38,6 +38,7 @@ def compare_batch(batch_id, method='CIEDE2000'):
     Returns:
         List of ComparisonResult instances
     """
+    import uuid
     batch = Batch.objects.get(id=batch_id)
     rolls = list(batch.rolls.exclude(status='pending').filter(
         avg_l__isnull=False
@@ -49,7 +50,7 @@ def compare_batch(batch_id, method='CIEDE2000'):
     # Clear old results
     ComparisonResult.objects.filter(batch=batch).delete()
 
-    results = []
+    comparison_objects = []
     for i in range(len(rolls)):
         for j in range(i + 1, len(rolls)):
             lab1 = (rolls[i].avg_l, rolls[i].avg_a, rolls[i].avg_b)
@@ -58,16 +59,20 @@ def compare_batch(batch_id, method='CIEDE2000'):
             de76 = delta_e_cie76(lab1, lab2)
             de00 = delta_e_ciede2000(lab1, lab2)
 
-            result = ComparisonResult.objects.create(
+            result = ComparisonResult(
+                id=uuid.uuid4(),
                 batch=batch,
                 roll_1=rolls[i],
                 roll_2=rolls[j],
                 delta_e_76=de76,
                 delta_e_00=de00,
             )
-            results.append(result)
+            comparison_objects.append(result)
 
-    return results
+    if comparison_objects:
+        ComparisonResult.objects.bulk_create(comparison_objects)
+
+    return comparison_objects
 
 
 def run_quality_gate(batch_id):
@@ -123,7 +128,8 @@ def run_quality_gate(batch_id):
             roll.status = 'rejected'
             rejected.append(roll)
 
-        roll.save(update_fields=['delta_e', 'status'])
+    if rolls:
+        Roll.objects.bulk_update(rolls, ['delta_e', 'status'])
 
     return {
         'accepted': accepted,
@@ -131,3 +137,4 @@ def run_quality_gate(batch_id):
         'rejected': rejected,
         'centroid': {'l': centroid[0], 'a': centroid[1], 'b': centroid[2]},
     }
+

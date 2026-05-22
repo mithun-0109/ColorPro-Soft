@@ -51,12 +51,19 @@ class Roll(models.Model):
 
     @property
     def scan_count(self):
+        if hasattr(self, '_prefetched_objects_cache') and 'scans' in self._prefetched_objects_cache:
+            return len(self.scans.all())
         return self.scans.count()
 
     @property
     def avg_rgb(self):
         """Return the average RGB from the latest confirmed scan."""
-        latest = self.scans.order_by('-scanned_at').first()
+        if hasattr(self, '_prefetched_objects_cache') and 'scans' in self._prefetched_objects_cache:
+            scans_list = list(self.scans.all())
+            latest = scans_list[0] if scans_list else None
+        else:
+            latest = self.scans.order_by('-scanned_at').first()
         if latest:
             return [latest.r, latest.g, latest.b]
         return None
+
