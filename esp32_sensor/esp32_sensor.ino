@@ -1,126 +1,219 @@
+/*
+ * ============================================================
+ *  ColorPro — ESP32 Connection Test
+ *  Wi-Fi  +  Backend Ping  +  OLED Display
+ *  (No sensor — connection testing only)
+ *
+ *  Required Libraries (Arduino Library Manager):
+ *    - Adafruit SSD1306
+ *    - Adafruit GFX
+ * ============================================================
+ */
+
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// OLED Pins (I2C)
-#define SDA_PIN 21
-#define SCL_PIN 22
+// ===================== CHANGE THESE =========================
+const char* WIFI_SSID     = "protosem";
+const char* WIFI_PASSWORD = "proto123";
+const char* SERVER_IP     = "192.168.56.23";  // Your PC's LAN IP
+const int   SERVER_PORT   = 8000;
+// ============================================================
+
+// ─── OLED (128x64, I2C) ─────────────────────────────────────
+#define SDA_PIN   21
+#define SCL_PIN   22
 #define OLED_ADDR 0x3C
-Adafruit_SSD1306 display(128, 64, &Wire, -1);
+Adafruit_SSD1306 oled(128, 64, &Wire, -1);
 
-// Wi-Fi & Server Details
-const char* ssid = "Hwjunction";
-const char* password = "forged@forge";
-const char* serverUrl = "http://192.168.55.191:8000/api/device/status/";
+// ─── State ───────────────────────────────────────────────────
+bool   serverOnline  = false;
+int    pingCode      = 0;
+String localIP       = "---.---.---.---";
+unsigned long lastPing = 0;
+const  unsigned long PING_EVERY = 10000; // 10 seconds
 
-String serverStatus = "Offline";
-unsigned long lastPollTime = 0;
-const unsigned long pollInterval = 5000; // 5 seconds
-// TCS3200 Pins
-#define S0 17
-#define S1 5
-#define S2 18
-#define S3 19
-#define OUT 23
-#define LED 16
-
-void setup() {
-  Serial.begin(115200);
-  
-  // Initialize Pins
-  pinMode(S0, OUTPUT); pinMode(S1, OUTPUT);
-  pinMode(S2, OUTPUT); pinMode(S3, OUTPUT);
-  pinMode(LED, OUTPUT);
-  pinMode(OUT, INPUT);
-
-  // Frequency Scaling 20%
-  digitalWrite(S0, HIGH); digitalWrite(S1, LOW);
-  digitalWrite(LED, HIGH); // Turn on LED
-
-  Wire.begin(SDA_PIN, SCL_PIN);
-  if(!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println("SSD1306 allocation failed");
-    // Try alternate address
-    if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
-      for(;;);
-    }
-  }
-
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("Connecting Wi-Fi...");
-  display.display();
-
-  Serial.print("Connecting to Wi-Fi");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("\nWiFi connected, IP:");
-  Serial.println(WiFi.localIP());
-
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("Wi-Fi Connected!");
-  display.print("IP: "); display.println(WiFi.localIP());
-  display.display();
-  delay(2000);
+// ─── Build API URL ───────────────────────────────────────────
+String apiUrl(const char* path) {
+  return "http://" + String(SERVER_IP) + ":" + String(SERVER_PORT) + path;
 }
 
-void loop() {
-  // Read RED
-  digitalWrite(S2, LOW); digitalWrite(S3, LOW);
-  int r = pulseIn(OUT, LOW);
-  
-  // Read GREEN
-  digitalWrite(S2, HIGH); digitalWrite(S3, HIGH);
-  int g = pulseIn(OUT, LOW);
-  
-  // Read BLUE
-  digitalWrite(S2, LOW); digitalWrite(S3, HIGH);
-  int b = pulseIn(OUT, LOW);
+// ─── OLED: draw the status screen ────────────────────────────
+void updateDisplay() {
+  oled.clearDisplay();
+  oled.setTextColor(SSD1306_WHITE);
 
-  // Poll Server
-  if (millis() - lastPollTime >= pollInterval) {
-    if (WiFi.status() == WL_CONNECTED) {
-      HTTPClient http;
-      http.begin(serverUrl);
-      int httpResponseCode = http.GET();
-      if (httpResponseCode > 0) {
-        String payload = http.getString();
-        serverStatus = (httpResponseCode == 200) ? "Connected" : String("Err: ") + String(httpResponseCode);
-      } else {
-        serverStatus = "Offline";
-      }
-      http.end();
-    } else {
-      serverStatus = "No Wi-Fi";
-    }
-    lastPollTime = millis();
+  // ── Title bar ──
+  oled.setTextSize(1);
+  oled.setCursor(22, 0);
+  oled.print("ColorPro ESP32");
+  oled.drawLine(0, 9, 127, 9, SSD1306_WHITE);
+
+  // ── Wi-Fi row ──
+  oled.setCursor(0, 13);
+  oled.print("WiFi: ");
+  if (WiFi.status() == WL_CONNECTED) {
+    oled.println("Connected");
+    oled.setCursor(0, 24);
+    oled.print("IP: ");
+    oled.println(localIP);
+  } else {
+    oled.println("OFFLINE");
+    oled.setCursor(0, 24);
+    oled.println("Reconnecting...");
   }
 
-  // Update Display
-  display.clearDisplay();
-  display.setCursor(0, 0);
-  display.println("--- COLOR SCAN ---");
-  display.setCursor(0, 15);
-  display.print("R: "); display.println(r);
-  display.print("G: "); display.println(g);
-  display.print("B: "); display.println(b);
-  display.setCursor(0, 45);
-  display.print("Srv: ");
-  display.println(serverStatus);
-  display.display();
+  // ── Server row ──
+  oled.drawLine(0, 35, 127, 35, SSD1306_WHITE);
+  oled.setCursor(0, 38);
+  oled.print("Server: ");
+  oled.println(serverOnline ? "ONLINE" : "OFFLINE");
 
-  // Print to Serial for backup
-  Serial.print("R:"); Serial.print(r);
-  Serial.print(" G:"); Serial.print(g);
-  Serial.print(" B:"); Serial.println(b);
+  oled.setCursor(0, 49);
+  oled.print("Last ping: ");
+  oled.print(pingCode > 0 ? String(pingCode) : "---");
+
+  // ── Footer ──
+  oled.drawLine(0, 58, 127, 58, SSD1306_WHITE);
+  oled.setCursor(10, 59);
+  oled.print(SERVER_IP);
+  oled.print(":");
+  oled.print(SERVER_PORT);
+
+  oled.display();
+}
+
+// ─── Connect to Wi-Fi ────────────────────────────────────────
+void connectWiFi() {
+  if (WiFi.status() == WL_CONNECTED) return;
+
+  Serial.printf("[WiFi] Connecting to %s ...\n", WIFI_SSID);
+
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.println("Connecting to WiFi");
+  oled.println(WIFI_SSID);
+  oled.display();
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  int tries = 0;
+  while (WiFi.status() != WL_CONNECTED && tries < 40) {
+    delay(500);
+    Serial.print(".");
+    tries++;
+    // Animate dots on OLED
+    oled.print(".");
+    oled.display();
+  }
+
+  Serial.println();
+  if (WiFi.status() == WL_CONNECTED) {
+    localIP = WiFi.localIP().toString();
+    Serial.printf("[WiFi] Connected! IP: %s\n", localIP.c_str());
+  } else {
+    Serial.println("[WiFi] Failed to connect");
+    localIP = "N/A";
+  }
+}
+
+// ─── Ping the backend ────────────────────────────────────────
+void pingServer() {
+  if (WiFi.status() != WL_CONNECTED) {
+    serverOnline = false;
+    pingCode = 0;
+    return;
+  }
+
+  HTTPClient http;
+  http.begin(apiUrl("/api/device/ping/"));
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(5000);
+
+  pingCode = http.POST("{}");
+
+  if (pingCode == 200) {
+    serverOnline = true;
+    Serial.println("[Ping] Server: ONLINE (200)");
+  } else if (pingCode > 0) {
+    serverOnline = false;
+    Serial.printf("[Ping] Unexpected code: %d\n", pingCode);
+  } else {
+    serverOnline = false;
+    Serial.printf("[Ping] Failed: %s\n", http.errorToString(pingCode).c_str());
+  }
+
+  http.end();
+}
+
+// ═════════════════════════════════════════════════════════════
+//  SETUP
+// ═════════════════════════════════════════════════════════════
+void setup() {
+  Serial.begin(115200);
+  Serial.println("\n===== ColorPro ESP32 Connection Test =====");
+
+  // Init I2C and OLED
+  Wire.begin(SDA_PIN, SCL_PIN);
+  if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
+    // Try alternate address 0x3D
+    if (!oled.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+      Serial.println("[OLED] Init FAILED — check wiring");
+      for (;;);  // Stop here so you can debug
+    }
+  }
+  oled.clearDisplay();
+  oled.display();
+
+  // Splash
+  oled.setTextSize(2);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(10, 8);
+  oled.println("ColorPro");
+  oled.setTextSize(1);
+  oled.setCursor(28, 30);
+  oled.println("Shade Tester");
+  oled.setCursor(28, 45);
+  oled.println("Starting up...");
+  oled.display();
+  delay(1500);
+
+  // Connect WiFi
+  connectWiFi();
+
+  // First ping
+  pingServer();
+  lastPing = millis();
+
+  // Draw initial screen
+  updateDisplay();
+}
+
+// ═════════════════════════════════════════════════════════════
+//  LOOP
+// ═════════════════════════════════════════════════════════════
+void loop() {
+  unsigned long now = millis();
+
+  // Reconnect WiFi if dropped
+  if (WiFi.status() != WL_CONNECTED) {
+    connectWiFi();
+  }
+
+  // Ping server every PING_EVERY ms
+  if (now - lastPing >= PING_EVERY) {
+    pingServer();
+    lastPing = now;
+  }
+
+  // Refresh OLED
+  updateDisplay();
 
   delay(500);
 }

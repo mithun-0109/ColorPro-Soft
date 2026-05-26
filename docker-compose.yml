@@ -18,6 +18,7 @@ services:
       - CORS_ALLOW_ALL_ORIGINS=True
       - DELTA_E_WARN_THRESHOLD=0.6
       - DELTA_E_REJECT_THRESHOLD=0.8
+      - SQLITE_DB_PATH=/app/db_data/db.sqlite3
 
 volumes:
   colorpro_data:
